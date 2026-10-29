@@ -26470,6 +26470,7 @@ local function buildUI(parent)
 	})
 	rounded(panel, 8)
 	new("UIStroke", panel, { Color = colors.border, Thickness = 1 })
+	ui.scale = new("UIScale", panel, { Scale = 1 })
 	local header = new("TextButton", panel, {
 		Name = "DragHandle",
 		Size = UDim2.new(1, -112, 0, 67),
@@ -26501,13 +26502,35 @@ local function buildUI(parent)
 	local close = button(panel, "x", UDim2.new(1, -56, 0, 12), UDim2.fromOffset(44, 44), function()
 		App.unload()
 	end)
-	ui.reopen = button(root, "999", UDim2.new(0, 12, 0.5, -24), UDim2.fromOffset(48, 48), function()
-		if not ui.reopenDragged then
-			ui.setVisible(true)
-		end
-		ui.reopenDragged = false
+	-- compact mini box (replaces the old "999" reopen button)
+	local mini = new("Frame", root, {
+		Name = "Mini",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0, 12, 0.5, -24),
+		Size = UDim2.fromOffset(200, 52),
+		BackgroundColor3 = colors.base,
+		Active = true,
+		Visible = false,
+	})
+	rounded(mini, 8)
+	new("UIStroke", mini, { Color = colors.border, Thickness = 1 })
+	ui.miniStatus = label(mini, App.status, UDim2.fromOffset(8, 4), UDim2.new(1, -52, 0, 22), 12, colors.mint)
+	ui.miniDetail = label(mini, "", UDim2.fromOffset(8, 26), UDim2.new(1, -52, 0, 16), 10, colors.muted)
+	for _, l in ipairs({ ui.miniStatus, ui.miniDetail }) do
+		l.TextWrapped, l.TextTruncate = false, Enum.TextTruncate.AtEnd
+	end
+	local miniRail = new("Frame", mini, {
+		Position = UDim2.new(0, 8, 1, -7),
+		Size = UDim2.new(1, -16, 0, 3),
+		BackgroundColor3 = colors.raised,
+	})
+	rounded(miniRail, 2)
+	ui.miniFill = new("Frame", miniRail, { Size = UDim2.fromScale(0, 1), BackgroundColor3 = colors.mint })
+	rounded(ui.miniFill, 2)
+	button(mini, "+", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(34, 34), function()
+		ui.setVisible(true)
 	end)
-	ui.reopen.Visible = false
+	ui.reopen = mini
 	ui.panel = panel
 	local navigation = new(
 		"Frame",
@@ -26924,9 +26947,12 @@ local function buildUI(parent)
 			return
 		end
 		drag = nil
-		panel.Size =
-			UDim2.fromOffset(math.min(480, math.max(1, viewport.X - 24)), math.min(560, math.max(1, viewport.Y - 24)))
-		local compact = viewport.Y < 440
+		-- scale the whole panel down on small viewports (1.0 on big screens, down to 0.55)
+		local scale = math.clamp(math.min(viewport.X / 640, viewport.Y / 620), 0.55, 1)
+		ui.scale.Scale = scale
+		local vx, vy = viewport.X / scale, viewport.Y / scale
+		panel.Size = UDim2.fromOffset(math.min(480, math.max(1, vx - 24)), math.min(560, math.max(1, vy - 24)))
+		local compact = vy < 440
 		local bodyTop = compact and 96 or 132
 		header.Size = UDim2.new(1, -112, 0, compact and 44 or 67)
 		mark.Position = UDim2.fromOffset(16, compact and 6 or 14)
@@ -26962,6 +26988,9 @@ local function buildUI(parent)
 		setProperty(ui.status, "Text", App.status)
 		setProperty(ui.detail, "Text", App.detail)
 		setProperty(ui.fill, "Size", UDim2.fromScale(App.progress, 1))
+		setProperty(ui.miniStatus, "Text", App.status)
+		setProperty(ui.miniDetail, "Text", App.detail)
+		setProperty(ui.miniFill, "Size", UDim2.fromScale(App.progress, 1))
 		setProperty(
 			ui.start,
 			"Text",
@@ -27284,7 +27313,8 @@ local function buildUI(parent)
 	end)
 	layout()
 	refresh()
-    
+
+	-- starts in compact mode; change to ui.setVisible(true) to start with the full panel
 	ui.setVisible(false)
 end
 
