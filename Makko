@@ -1,3 +1,8 @@
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+setfpscap(200)
 local source = [=[
 local Logic = (function()
 local Logic = {}
@@ -3214,15 +3219,44 @@ do
 					end
 					log("Skull spot not reachable (" .. tostring(reason) .. "), waiting for the relic anyway")
 				end
-				status("Charging the skull", "Waiting for the game to award the relic", 0.83)
-				if
-					waitUntil(function()
-						return App.player:GetAttribute("HasRelic") == true
-					end, 15, generation)
-				then
-					return true
-				end
-			end
+                
+                local model, root = character()
+                local humanoid = model and model:FindFirstChildOfClass("Humanoid")
+                
+                if humanoid and root and alive() then
+                    local direction = root.CFrame.LookVector
+                    direction = Vector3.new(direction.X, 0, direction.Z)
+                
+                    if direction.Magnitude > 0 then
+                        direction = direction.Unit
+                        local startPosition = root.Position
+                
+                        humanoid:MoveTo(startPosition + direction * 5)
+                
+                        local deadline = os.clock() + 5
+                
+                        while alive() and humanoid.Health > 0 and os.clock() < deadline do
+                            local traveled = (root.Position - startPosition):Dot(direction)
+                
+                            if traveled >= 5 then
+                                break
+                            end
+                
+                            task.wait(0.05)
+                        end
+                
+                        humanoid:Move(Vector3.zero, false)
+                    end
+                end
+                
+                status("Charging the skull", "Waiting for the game to award the relic", 0.83)
+                
+                if waitUntil(function()
+                    return App.player:GetAttribute("HasRelic") == true
+                end, 15, generation) then
+                    return true
+                end
+                end
 			if attempt == Mirrors.maxAttempts then
 				return false, "The mirrors haven't awarded the relic. Try again once the room settles."
 			end
@@ -26467,7 +26501,7 @@ local function buildUI(parent)
 	local close = button(panel, "x", UDim2.new(1, -56, 0, 12), UDim2.fromOffset(44, 44), function()
 		App.unload()
 	end)
-	ui.reopen = button(root, "Z", UDim2.new(0, 12, 0.5, -24), UDim2.fromOffset(48, 48), function()
+	ui.reopen = button(root, "999", UDim2.new(0, 12, 0.5, -24), UDim2.fromOffset(48, 48), function()
 		if not ui.reopenDragged then
 			ui.setVisible(true)
 		end
@@ -26909,7 +26943,7 @@ local function buildUI(parent)
 			page.Position = UDim2.fromOffset(16, bodyTop)
 			page.Size = UDim2.new(1, -32, 0, math.max(1, panel.Size.Y.Offset - bodyTop - (compact and 76 or 92)))
 		end
-		local center = ui.center or Vector2.new(0.5, 0.5)
+		local center = ui.center or Vector2.new(0.15, 0.5)
 		ui.center = place(panel, Vector2.new(center.X * viewport.X, center.Y * viewport.Y))
 		if ui.reopenCenter then
 			place(ui.reopen, Vector2.new(ui.reopenCenter.X * viewport.X, ui.reopenCenter.Y * viewport.Y))
@@ -27250,7 +27284,8 @@ local function buildUI(parent)
 	end)
 	layout()
 	refresh()
-	ui.setVisible(true)
+    
+	ui.setVisible(false)
 end
 
 App.unload = function()
