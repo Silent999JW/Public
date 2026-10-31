@@ -12,7 +12,7 @@ Logic.games = {
 		id = "hollow",
 		name = "The Hollow",
 		place = 116463962153167,
-		objective = "Clear floors 1-9 and bring the relic back",
+		objective = "Clear floors 1-9 or choose floor 10 for the finale",
 	},
 	{
 		id = "shawarma",
@@ -1802,8 +1802,9 @@ local function rideElevator(part, clientState, objects, generation, floor)
 		end
 		local maze = App.player:GetAttribute("InMaze")
 		local inMaze = maze ~= nil and maze ~= false
-		return inMaze and (type(maze) ~= "number" or maze == floor)
-	end, 45, generation)
+		return floor == 10 and App.player:GetAttribute("InFinale") == true
+			or inMaze and (type(maze) ~= "number" or maze == floor)
+	end, floor == 10 and 150 or 45, generation)
 	if not arrived then
 		local ownsRide = env.__HOLLOW_PANEL == App
 			and (active(generation) or (App.generation == generation + 1 and not App.running))
@@ -1811,6 +1812,9 @@ local function rideElevator(part, clientState, objects, generation, floor)
 			clientState.setState("ElevatorSelection", -1)
 		end
 		return false, "The elevator didn't start"
+	end
+	if floor == 10 then
+		return true
 	end
 	return finishRide()
 end
@@ -1902,7 +1906,7 @@ local function readHollowData(name)
 	return ok and decoded or nil
 end
 
-local function checkBadge(id, force)
+local function checkBadge(id, force, generation)
 	local cached = App.badgeState[id]
 	if cached and (cached.owned == true or (not force and os.clock() - cached.at < 8)) then
 		return cached.owned
@@ -1912,7 +1916,7 @@ local function checkBadge(id, force)
 	end
 	local ok, owned = call("Badge " .. tostring(id), function()
 		return Badges:UserHasBadgeAsync(App.player.UserId, id)
-	end, 8)
+	end, 8, generation)
 	if ok and type(owned) == "boolean" then
 		App.badgeState[id] = { owned = owned, at = os.clock() }
 		return owned
@@ -3496,12 +3500,17 @@ end
 local function runHollow(generation)
 	local floor = App.floor
 	local maze = App.player:GetAttribute("InMaze")
-	if type(maze) == "number" then
+	if App.player:GetAttribute("InFinale") == true then
+		floor, App.floor = 10, 10
+	elseif type(maze) == "number" then
 		floor = maze
 		App.floor = floor
 	end
-	if floor ~= 1 and floor ~= 2 and floor ~= 3 and floor ~= 4 and floor ~= 5 and floor ~= 6 and floor ~= 7 and floor ~= 8 and floor ~= 9 then
-		return false, "Choose a floor from 1 to 9"
+	if floor == 10 then
+		return App.finale.run(generation)
+	end
+	if type(floor) ~= "number" or floor % 1 ~= 0 or floor < 1 or floor > 10 then
+		return false, "Choose a floor from 1 to 10"
 	end
 	local loaded = waitUntil(function()
 		return App.player:FindFirstChild("Loaded")
@@ -3788,19 +3797,22 @@ local function runHollow(generation)
 end
 
 function App.runHollowAll(generation)
+	if App.floor == 10 or App.player:GetAttribute("InFinale") == true then
+		return runHollow(generation)
+	end
 	local floor = 1
 	local maze = App.player:GetAttribute("InMaze")
 	if type(maze) == "number" then
 		floor = maze
 	end
 	local fails = 0
-	while floor <= 9 do
+	while floor <= 10 do
 		if not active(generation) then
 			return false, "Stopped"
 		end
 		-- if we're inside a floor (e.g. after a retry), continue that one
 		local inside = App.player:GetAttribute("InMaze")
-		if type(inside) == "number" and inside >= 1 and inside <= 9 then
+		if type(inside) == "number" and inside >= 1 and inside <= 10 then
 			floor = inside
 		end
 		App.floor = floor
@@ -3826,7 +3838,7 @@ function App.runHollowAll(generation)
 			end
 		end
 	end
-	return true, "All 9 floors finished"
+	return true, "All 10 floors finished"
 end
 
 local function runKeyboard(generation)
@@ -26757,6 +26769,143 @@ local function button(parent, text, position, size, callback)
 	return object
 end
 
+-- floor 10 finale
+do
+	(function()
+		local Finale = {}
+		local destination = CFrame.new(7362.39844, 1473.10889, 539.395874)
+		local badgeCheckedAt = 0
+		local badgeCheckPending = false
+		local badgeOwned = false
+
+		function Finale.completed(generation)
+			for number in tostring(App.player:GetAttribute("CompletedFloors") or ""):gmatch("%d+") do
+				if tonumber(number) == 10 then
+					return true
+				end
+			end
+			if App.player:GetAttribute("OwnsHollowBadge") == true then
+				return true
+			end
+			local badgeId = tonumber(Storage:GetAttribute("Fl10_mainBadgeId"))
+			if badgeId and not badgeCheckPending and os.clock() >= badgeCheckedAt then
+				badgeCheckedAt = os.clock() + 5
+				badgeCheckPending = true
+				task.spawn(function()
+					local owned = checkBadge(badgeId, true, generation)
+					if active(generation) and owned == true then
+						badgeOwned = true
+					end
+					badgeCheckPending = false
+				end)
+			end
+			return badgeOwned
+		end
+
+		function Finale.run(generation)
+			if Finale.completed(generation) then
+				App.rows.hollow = "Finale finished"
+				return true, "Finale finished"
+			end
+			local teleportedCharacter, walkToPortal, session = nil, true, {}
+			table.insert(App.cleanups, function()
+				EventInput.release(session)
+				local model, root, humanoid = character()
+				if model and root and humanoid then
+					humanoid:MoveTo(root.Position)
+					humanoid:Move(Vector3.zero, false)
+				end
+			end)
+			while active(generation) do
+				if Finale.completed(generation) then
+					App.rows.hollow = "Finale finished"
+					return true, "Finale finished"
+				end
+				local model, root, humanoid = character()
+				if root and humanoid and humanoid.Health > 0 then
+					if teleportedCharacter ~= model then
+						root.CFrame = destination
+						teleportedCharacter = model
+						walkToPortal = true
+					end
+					local portal = getPath(
+						workspace,
+						"FinaleZone",
+						"FinaleModel",
+						"KeyRoom3-Blockout",
+						"SectionPortal"
+					)
+					local portalPosition = positionOf(portal)
+					local prompt = portal and portal:FindFirstChildWhichIsA("ProximityPrompt", true)
+					local target = walkToPortal and portalPosition
+						or (destination.Position - Vector3.new(0, 5, 0))
+					walkToPortal = not walkToPortal
+					if target then
+						humanoid:MoveTo(target)
+						local walkUntil = os.clock() + 5
+						while
+							active(generation)
+							and App.player.Character == model
+							and humanoid.Health > 0
+							and not Finale.completed(generation)
+							and os.clock() < walkUntil
+						do
+							if not pause(0.1, generation) then
+								break
+							end
+						end
+						if root.Parent and humanoid.Parent then
+							humanoid:MoveTo(root.Position)
+							humanoid:Move(Vector3.zero, false)
+						end
+					end
+					if
+						prompt
+						and prompt:IsDescendantOf(workspace)
+						and prompt.Enabled
+						and active(generation)
+						and App.player.Character == model
+					then
+						local allowed = function()
+							return active(generation)
+								and App.player.Character == model
+								and portal:IsDescendantOf(workspace)
+								and prompt.Enabled
+						end
+						local activated = EventInput.hold(session, prompt, generation, allowed)
+						local _, liveRoot = character()
+						local promptPoint = EventInput.point(prompt.Parent)
+						if
+							not activated
+							and type(fireproximityprompt) == "function"
+							and allowed()
+							and liveRoot
+							and promptPoint
+							and (liveRoot.Position - promptPoint).Magnitude <= prompt.MaxActivationDistance
+						then
+							call("Floor 10 portal prompt", function()
+								if allowed() then
+									return fireproximityprompt(prompt, prompt.HoldDuration)
+								end
+								return false
+							end, prompt.HoldDuration + 2, generation)
+						end
+					end
+					status("Floor 10 finale", "Waiting for completion", 0.5)
+				else
+					status("Floor 10 finale", "Waiting for your character", App.progress)
+				end
+				if not pause(1, generation) then
+					break
+				end
+			end
+			return false, "Stopped"
+		end
+
+		App.finale = Finale
+	end)()
+end
+
 -- menu
 local function buildUI(parent)
 	local gui = new("ScreenGui", parent, {
@@ -27137,7 +27286,7 @@ local function buildUI(parent)
 		end)
 		button(floors, ">", UDim2.new(1, -44, 0, 0), UDim2.fromOffset(44, 44), function()
 			if not App.running then
-				App.floor = math.min(9, App.floor + 1)
+				App.floor = math.min(10, App.floor + 1)
 				refresh()
 			end
 		end)
