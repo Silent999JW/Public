@@ -12,7 +12,7 @@ Logic.games = {
 		id = "hollow",
 		name = "The Hollow",
 		place = 116463962153167,
-		objective = "Clear floors 1-7 and bring the relic back",
+		objective = "Clear floors 1-8 and bring the relic back",
 	},
 	{
 		id = "shawarma",
@@ -3500,8 +3500,8 @@ local function runHollow(generation)
 		floor = maze
 		App.floor = floor
 	end
-	if floor ~= 1 and floor ~= 2 and floor ~= 3 and floor ~= 4 and floor ~= 5 and floor ~= 6 and floor ~= 7 then
-		return false, "Choose a floor from 1 to 7"
+	if floor ~= 1 and floor ~= 2 and floor ~= 3 and floor ~= 4 and floor ~= 5 and floor ~= 6 and floor ~= 7 and floor ~= 8 then
+		return false, "Choose a floor from 1 to 8"
 	end
 	local loaded = waitUntil(function()
 		return App.player:FindFirstChild("Loaded")
@@ -3522,6 +3522,7 @@ local function runHollow(generation)
 		or floor == 5 and Bridge.mirrorsCompleted()
 		or floor == 6 and Bridge.brewCompleted()
 		or floor == 7 and Bridge.lanternsCompleted()
+		or floor == 8 and Bridge.offeringsCompleted()
 	if completed and not App.player:GetAttribute("InMaze") and App.player:GetAttribute("HasRelic") ~= true then
 		return true, "Floor " .. floor .. " has already been completed"
 	end
@@ -3559,7 +3560,14 @@ local function runHollow(generation)
 	if not pause(2, generation) then
 		return false, "Stopped"
 	end
-	if floor == 7 then
+	if floor == 8 then
+		if not completed and App.player:GetAttribute("HasRelic") ~= true then
+			local solved, solveError = Bridge.solveOfferings(objects, clientState, generation)
+			if not solved then
+				return false, solveError
+			end
+		end
+	elseif floor == 7 then
 		if not completed and App.player:GetAttribute("HasRelic") ~= true then
 			local solved, solveError = Bridge.solveLanterns(objects, clientState, generation)
 			if not solved then
@@ -3751,13 +3759,14 @@ local function runHollow(generation)
 		return false, returnError
 	end
 	if
-		(floor == 4 or floor == 5 or floor == 6 or floor == 7)
+		(floor == 4 or floor == 5 or floor == 6 or floor == 7 or floor == 8)
 		and not waitUntil(function()
 			return (
 				floor == 4 and Bridge.completed()
 				or floor == 5 and Bridge.mirrorsCompleted()
 				or floor == 6 and Bridge.brewCompleted()
 				or floor == 7 and Bridge.lanternsCompleted()
+				or floor == 8 and Bridge.offeringsCompleted()
 			)
 				and not App.player:GetAttribute("InMaze")
 				and App.player:GetAttribute("HasRelic") ~= true
@@ -3776,13 +3785,13 @@ function App.runHollowAll(generation)
 		floor = maze
 	end
 	local fails = 0
-	while floor <= 7 do
+	while floor <= 8 do
 		if not active(generation) then
 			return false, "Stopped"
 		end
 		-- if we're inside a floor (e.g. after a retry), continue that one
 		local inside = App.player:GetAttribute("InMaze")
-		if type(inside) == "number" and inside >= 1 and inside <= 7 then
+		if type(inside) == "number" and inside >= 1 and inside <= 8 then
 			floor = inside
 		end
 		App.floor = floor
@@ -3808,7 +3817,7 @@ function App.runHollowAll(generation)
 			end
 		end
 	end
-	return true, "All 7 floors finished"
+	return true, "All 8 floors finished"
 end
 
 local function runKeyboard(generation)
@@ -26325,6 +26334,186 @@ do
 	runners.shawarma = Event7.runShawarma
 end
 
+-- Floor 8 offerings
+do
+	(function()
+		local Day8 = {}
+
+		function Day8.part(object)
+			return App.event7.part(object)
+		end
+
+		function Day8.nearest(items)
+			local _, root = character()
+			if not root then
+				return nil
+			end
+			local best, length
+			for _, item in ipairs(items) do
+				if item.part and item.part.Parent then
+					local distance = (root.Position - item.part.Position).Magnitude
+					if not length or distance < length then
+						best, length = item, distance
+					end
+				end
+			end
+			return best, length
+		end
+
+		function Day8.hollowState()
+			local puzzle = Day8.offerings
+			local state = puzzle and type(puzzle.getState) == "function" and puzzle.getState()
+			return type(state) == "table" and type(state.Needs) == "table" and type(state.Placed) == "table" and state
+				or nil
+		end
+
+		function Day8.altar(generation)
+			local entries = {}
+			for _, object in ipairs(Collection:GetTagged("%OfferingAltar")) do
+				local part = Day8.part(object)
+				if part then
+					table.insert(entries, { object = object, part = part })
+				end
+			end
+			local altar = Day8.nearest(entries)
+			return altar
+				and approach(altar.part.Position, generation, altar.object, false, function()
+					return active(generation) and App.player:GetAttribute("InMaze") == 8
+				end)
+		end
+
+		function Day8.pedestals(state)
+			local items = {}
+			if not state then
+				return items
+			end
+			for _, object in ipairs(Collection:GetTagged("%OfferingPedestal")) do
+				local key = object:GetAttribute(tostring(App.player.UserId))
+				key = key ~= nil and tostring(key) or nil
+				local part = Day8.part(object)
+				if part and key and state.Needs[key] and not state.Placed[key] then
+					table.insert(items, {
+						object = object,
+						part = part,
+						key = key,
+						item = state.Needs[key],
+						title = tostring(state.Needs[key]),
+					})
+				end
+			end
+			return items
+		end
+
+		function Bridge.offeringsCompleted()
+			for number in tostring(App.player:GetAttribute("CompletedFloors") or ""):gmatch("%d+") do
+				if tonumber(number) == 8 then
+					return true
+				end
+			end
+			return false
+		end
+
+		function Bridge.solveOfferings(_, _, generation)
+			for _, name in ipairs({ "OfferingsPuzzle", "OfferingAltar", "OfferingPedestal" }) do
+				local value, reason = hollowModule(name, generation)
+				if not value then
+					return false, reason
+				end
+				if name == "OfferingsPuzzle" then
+					Day8.offerings = value
+				end
+			end
+			local session, missingAt = {}, os.clock()
+			table.insert(App.cleanups, function()
+				EventInput.release(session)
+			end)
+			while active(generation) and App.player:GetAttribute("InMaze") == 8 do
+				if App.player:GetAttribute("HasRelic") == true then
+					return true
+				end
+				local state, model = Day8.hollowState(), character()
+				if not state or not model then
+					status("Loading the offerings", "Waiting for your altar and pedestal list", 0.15)
+				elseif state.Solved then
+					status("Offerings placed", "Waiting for the relic", 0.85)
+				else
+					local holding = Day8.offerings.holding()
+					local pending = Day8.pedestals(state)
+					local placed, total = 0, 0
+					for key in pairs(state.Needs) do
+						total += 1
+						if state.Placed[key] then
+							placed += 1
+						end
+					end
+					status(
+						"Placing the offerings",
+						string.format("%d / %d placed", placed, total),
+						0.2 + 0.6 * placed / math.max(1, total)
+					)
+					local target
+					if holding then
+						local matching = {}
+						for _, entry in ipairs(pending) do
+							if entry.item == holding then
+								table.insert(matching, entry)
+							end
+						end
+						target = Day8.nearest(matching)
+						if target then
+							local function allowed()
+								return active(generation)
+									and App.player.Character == model
+									and App.player:GetAttribute("InMaze") == 8
+									and Day8.offerings.holding() == holding
+									and target.object:IsDescendantOf(workspace)
+							end
+							if approach(target.part.Position, generation, target.object, false, allowed) then
+								waitUntil(function()
+									local now = Day8.hollowState()
+									return now and now.Placed[target.key] or not allowed()
+								end, 4, generation)
+							end
+						end
+					else
+						target = Day8.nearest(pending)
+					end
+					if target and not holding then
+						if Day8.altar(generation) and active(generation) then
+							Day8.offerings.useAltarItem(target.item)
+							waitUntil(function()
+								return Day8.offerings.holding() ~= nil or not active(generation)
+							end, 4, generation)
+						end
+					elseif holding and not target then
+						status("Returning the extra offering", tostring(holding), App.progress)
+						if Day8.altar(generation) and active(generation) then
+							Day8.offerings.useAltarItem(holding)
+							waitUntil(function()
+								return Day8.offerings.holding() ~= holding
+							end, 4, generation)
+						end
+					end
+					if target then
+						missingAt = os.clock()
+					end
+				end
+				if os.clock() - missingAt > 35 then
+					local hint = nearest("%OfferingAltar") or nearest("%OfferingPedestal")
+					if hint then
+						approach(positionOf(hint), generation, hint)
+					end
+					missingAt = os.clock()
+				end
+				if not pause(0.25, generation) then
+					break
+				end
+			end
+			return false, active(generation) and "The floor changed" or "Stopped"
+		end
+	end)()
+end
+
 local function start()
 	if App.running or App.traveling or not App.player or not current then
 		return
@@ -26823,7 +27012,7 @@ local function buildUI(parent)
 		end)
 		button(floors, ">", UDim2.new(1, -44, 0, 0), UDim2.fromOffset(44, 44), function()
 			if not App.running then
-				App.floor = math.min(7, App.floor + 1)
+				App.floor = math.min(8, App.floor + 1)
 				refresh()
 			end
 		end)
