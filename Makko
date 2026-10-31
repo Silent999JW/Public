@@ -12,7 +12,7 @@ Logic.games = {
 		id = "hollow",
 		name = "The Hollow",
 		place = 116463962153167,
-		objective = "Clear floors 1-8 and bring the relic back",
+		objective = "Clear floors 1-9 and bring the relic back",
 	},
 	{
 		id = "shawarma",
@@ -3500,8 +3500,8 @@ local function runHollow(generation)
 		floor = maze
 		App.floor = floor
 	end
-	if floor ~= 1 and floor ~= 2 and floor ~= 3 and floor ~= 4 and floor ~= 5 and floor ~= 6 and floor ~= 7 and floor ~= 8 then
-		return false, "Choose a floor from 1 to 8"
+	if floor ~= 1 and floor ~= 2 and floor ~= 3 and floor ~= 4 and floor ~= 5 and floor ~= 6 and floor ~= 7 and floor ~= 8 and floor ~= 9 then
+		return false, "Choose a floor from 1 to 9"
 	end
 	local loaded = waitUntil(function()
 		return App.player:FindFirstChild("Loaded")
@@ -3523,6 +3523,7 @@ local function runHollow(generation)
 		or floor == 6 and Bridge.brewCompleted()
 		or floor == 7 and Bridge.lanternsCompleted()
 		or floor == 8 and Bridge.offeringsCompleted()
+		or floor == 9 and Bridge.leversCompleted()
 	if completed and not App.player:GetAttribute("InMaze") and App.player:GetAttribute("HasRelic") ~= true then
 		return true, "Floor " .. floor .. " has already been completed"
 	end
@@ -3560,7 +3561,14 @@ local function runHollow(generation)
 	if not pause(2, generation) then
 		return false, "Stopped"
 	end
-	if floor == 8 then
+	if floor == 9 then
+		if not completed and App.player:GetAttribute("HasRelic") ~= true then
+			local solved, solveError = Bridge.solveLevers(objects, clientState, generation)
+			if not solved then
+				return false, solveError
+			end
+		end
+	elseif floor == 8 then
 		if not completed and App.player:GetAttribute("HasRelic") ~= true then
 			local solved, solveError = Bridge.solveOfferings(objects, clientState, generation)
 			if not solved then
@@ -3759,7 +3767,7 @@ local function runHollow(generation)
 		return false, returnError
 	end
 	if
-		(floor == 4 or floor == 5 or floor == 6 or floor == 7 or floor == 8)
+		(floor == 4 or floor == 5 or floor == 6 or floor == 7 or floor == 8 or floor == 9)
 		and not waitUntil(function()
 			return (
 				floor == 4 and Bridge.completed()
@@ -3767,6 +3775,7 @@ local function runHollow(generation)
 				or floor == 6 and Bridge.brewCompleted()
 				or floor == 7 and Bridge.lanternsCompleted()
 				or floor == 8 and Bridge.offeringsCompleted()
+				or floor == 9 and Bridge.leversCompleted()
 			)
 				and not App.player:GetAttribute("InMaze")
 				and App.player:GetAttribute("HasRelic") ~= true
@@ -3785,13 +3794,13 @@ function App.runHollowAll(generation)
 		floor = maze
 	end
 	local fails = 0
-	while floor <= 8 do
+	while floor <= 9 do
 		if not active(generation) then
 			return false, "Stopped"
 		end
 		-- if we're inside a floor (e.g. after a retry), continue that one
 		local inside = App.player:GetAttribute("InMaze")
-		if type(inside) == "number" and inside >= 1 and inside <= 8 then
+		if type(inside) == "number" and inside >= 1 and inside <= 9 then
 			floor = inside
 		end
 		App.floor = floor
@@ -3817,7 +3826,7 @@ function App.runHollowAll(generation)
 			end
 		end
 	end
-	return true, "All 8 floors finished"
+	return true, "All 9 floors finished"
 end
 
 local function runKeyboard(generation)
@@ -26511,7 +26520,123 @@ do
 			end
 			return false, active(generation) and "The floor changed" or "Stopped"
 		end
+		App.day8 = Day8
 	end)()
+end
+
+do
+	local Day9 = {}
+
+	function Day9.part(object)
+		return App.day8.part(object)
+	end
+
+	function Bridge.leversCompleted()
+		for number in tostring(App.player:GetAttribute("CompletedFloors") or ""):gmatch("%d+") do
+			if tonumber(number) == 9 then
+				return true
+			end
+		end
+		return false
+	end
+
+	function Day9.leverState()
+		local puzzle = Day9.levers
+		local state = puzzle and puzzle.getState()
+		return type(state) == "table"
+				and type(state.Walls) == "table"
+				and type(state.Levers) == "table"
+				and type(state.Opened) == "number"
+				and state
+			or nil
+	end
+
+	function Day9.leverItems(state)
+		local items = {}
+		if not state then
+			return items
+		end
+		local expected = state.Walls[state.Opened + 1]
+		for _, object in ipairs(Collection:GetTagged(expected and "%WallLever" or "%LeverWallsRelic")) do
+			local part = Day9.part(object)
+			local key = object:GetAttribute(tostring(App.player.UserId))
+			local symbol = key ~= nil and (state.Levers[tostring(key)] or state.Levers[key])
+			if part and (not expected or symbol == expected) then
+				table.insert(items, {
+					object = object,
+					part = part,
+					key = key,
+					title = expected and "Next lever: " .. tostring(expected) or "Take rune",
+				})
+			end
+		end
+		return items
+	end
+
+	function Bridge.solveLevers(objects, _, generation)
+		local why
+		Day9.levers, why = hollowModule("LeverWallsPuzzle", generation)
+		if not Day9.levers then
+			return false, why
+		end
+		local deadline, retryAt = os.clock() + 300, 0
+		while active(generation) and os.clock() < deadline do
+			if App.player:GetAttribute("HasRelic") == true then
+				return true
+			end
+			if App.player:GetAttribute("InMaze") ~= 9 then
+				return false, "Floor changed"
+			end
+			local state = Day9.leverState()
+			local item = state and App.day8.nearest(Day9.leverItems(state))
+			if state and state.Solved then
+				status("Waiting for the rune", "", 0.84)
+			elseif item and os.clock() >= retryAt then
+				local opened, expected = state.Opened, state.Walls[state.Opened + 1]
+				status(
+					expected and "Pulling the next lever" or "Taking the rune",
+					item.title,
+					0.12 + 0.68 * math.min(opened / math.max(1, #state.Walls), 1)
+				)
+				local kind = expected and "WallLever" or "LeverWallsRelic"
+				local ok, native = call("Floor 9 " .. kind, function()
+					return objects.getObjectAsync(kind, item.object)
+				end, 4, generation)
+				if ok and native and active(generation) then
+					local point = EventInput.point(native.prompt and native.prompt.Parent or item.part)
+					local moved = point and approach(point, generation, native.handle or item.object)
+					local live = Day9.leverState()
+					if moved and live == state and live.Opened == opened and not live.Solved then
+						local valid = not expected or type(native.icon) == "function" and native:icon() == expected
+						if valid then
+							local sent = call("Floor 9 action", function()
+								if expected then
+									Day9.levers.pull(native)
+								else
+									Day9.levers.claim(native)
+								end
+							end, 4, generation)
+							if sent then
+								waitUntil(function()
+									local latest = Day9.leverState()
+									return App.player:GetAttribute("HasRelic") == true
+										or latest ~= state
+										or latest and (latest.Opened ~= opened or latest.Solved)
+								end, 5, generation)
+							end
+						end
+					end
+				end
+				retryAt = os.clock() + 1
+			else
+				status("Waiting for the next lever", "It'll retry when the room loads", 0.12)
+			end
+			if not pause(0.3, generation) then
+				break
+			end
+		end
+		return false, active(generation) and "The lever room hasn't advanced" or "Stopped"
+	end
 end
 
 local function start()
@@ -27012,7 +27137,7 @@ local function buildUI(parent)
 		end)
 		button(floors, ">", UDim2.new(1, -44, 0, 0), UDim2.fromOffset(44, 44), function()
 			if not App.running then
-				App.floor = math.min(8, App.floor + 1)
+				App.floor = math.min(9, App.floor + 1)
 				refresh()
 			end
 		end)
